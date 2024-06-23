@@ -1,0 +1,173 @@
+% Number of users
+m = 1000; % Number of users 
+
+% Load user locations
+USER_LOC = load('UserLocation1.txt');
+
+% Define the configurations for testing
+uav_counts = 10:10:50; % UAV counts from 1 to 10
+cluster_counts = 10:10:100; % Cluster counts from 10 to 100
+
+% Initialize arrays to store results
+cumulative_users_covered = zeros(length(uav_counts), length(cluster_counts));
+elapsed_times = zeros(length(uav_counts), length(cluster_counts));
+
+% Nested loop through the configurations
+for uav_idx = 1:length(uav_counts)
+    for cluster_idx = 1:length(cluster_counts)
+        n = uav_counts(uav_idx); % number of UAVs
+        k = cluster_counts(cluster_idx); % number of clusters
+
+        % Clustering users into 'k' groups using k-means
+        [user_cluster_idx, cluster_center] = kmeans(USER_LOC, k);
+
+        % Calculate the number of users in each cluster
+        users_in_cluster = histcounts(user_cluster_idx, k)';
+
+%         % Print the number of users in each cluster
+%         disp(['Number of users in each cluster for ', num2str(k), ' clusters:']);
+%         disp(users_in_cluster);
+
+        % Optimization setup
+        cvx_clear
+        cvx_solver gurobi
+        tic; % Start timer
+        cvx_begin
+
+
+            variable x(n) % x-coordinate of the UAV 
+
+            variable y(n) % y-coordinate of the UAV
+            variable X(k, n) % cluster association with UAV (kxn matrix) 
+            variable epsilon(k, n) binary % binary variable for enforcing distance constraints
+
+            expression d(k,n)
+            % UAV Parameters
+            UAV_HEIGHT = 350;
+            THETA = 60 * pi / 180;
+
+            % Coverage radius of the UAV
+            Coverage_radius = UAV_HEIGHT * tan(THETA / 2);
+
+            % Bound
+            M = 2000;
+
+            % Calculate distances
+            for i = 1:k
+                for j = 1:n
+                    d(i, j) = norm([x(j) - cluster_center(i, 1); y(j) - cluster_center(i, 2)], 2);
+                end
+            end
+
+            % Objective: Maximize the number of users covered by the UAVs
+            maximize(sum(users_in_cluster' * X))
+
+            %constraint
+            users_in_cluster' * X <= 20;
+    
+            % Constraint: Each cluster can be served by at most one UAV
+            for i = 1:k
+                sum(X(i, :)) <= 1;
+            end
+
+            % Constraint: Ensure X is a fraction between 0 and 1
+            for i = 1:k
+                for j = 1:n
+                    0 <= X(i, j) <= 1;
+                end
+            end
+
+            % Constraints 
+            for i = 1:k
+                for j = 1:n
+                    d(i, j) <= Coverage_radius + M * epsilon(i, j);
+                    X(i, j) <= 1 - epsilon(i, j);
+                end
+            end
+
+        cvx_end
+        elapsed_time = toc; % End timer
+
+        % Save elapsed time
+        elapsed_times(uav_idx, cluster_idx) = elapsed_time;
+
+        % Count the number of users within the coverage radius of each UAV
+        max_users_per_uav = 20;
+        user_counts = zeros(n, 1);
+        user_covered = zeros(m, 1); % array to mark users that are covered
+        total_users_covered = 0;
+
+        for i = 1:n
+            covered_count = 0;
+            for j = 1:m
+                if ~user_covered(j) % if user is not already covered
+                    dist = norm([x(i) - USER_LOC(j, 1); y(i) - USER_LOC(j, 2)], 2);
+                    if dist <= Coverage_radius
+                        user_counts(i) = user_counts(i) + 1;
+                        user_covered(j) = 1; % mark user as covered
+                        total_users_covered = total_users_covered + 1;
+                        covered_count = covered_count + 1;
+                        if covered_count >= max_users_per_uav
+                            break;
+                        end
+                    end
+                end
+            end
+        end
+
+        % Save the total cumulative number of unique users covered
+        cumulative_users_covered(uav_idx, cluster_idx) = total_users_covered;
+
+        % Display the number of users covered 
+        disp(['Number of UAVs: ', num2str(n)]);
+        disp(['Total Users Covered: ', num2str(total_users_covered)]);
+    end
+end
+
+% Define the colors
+colors = [
+    247, 251, 255;
+    222, 235, 247;
+    198, 219, 239;
+    158, 202, 225;
+    107, 174, 214;
+    66, 146, 198;
+    33, 113, 181;
+    8, 81, 156;
+    8, 48, 107;
+    0, 0, 139 
+] / 255;
+
+% Plot cumulative users covered vs number of UAVs for different cluster counts
+figure;
+hold on;
+for cluster_idx = 1:length(cluster_counts)
+    plot(uav_counts, cumulative_users_covered(:, cluster_idx), '-o', 'LineWidth', 2, 'Color', colors(cluster_idx, :), 'DisplayName', ['Clusters = ', num2str(cluster_counts(cluster_idx))]);
+end
+xlabel('Number of UAVs');
+ylabel('Cumulative Users Covered');
+title('Number of UAVs vs Cumulative Users Covered for Different Cluster Counts');
+legend;
+grid on;
+hold off;
+
+
+% Saving results to a file in a specific directory
+save('C:\Users\gowth\OneDrive\Desktop\thesis defense results\cluster_1000.mat', 'uav_counts', 'cluster_counts', 'cumulative_users_covered', 'elapsed_times');
+
+% Plot elapsed time vs number of UAVs for different cluster counts
+figure;
+hold on;
+for cluster_idx = 1:length(cluster_counts)
+    plot(uav_counts, elapsed_times(:, cluster_idx), '-o', 'LineWidth', 2, 'Color', colors(cluster_idx, :), 'DisplayName', ['Clusters = ', num2str(cluster_counts(cluster_idx))]);
+end
+xlabel('Number of UAVs');
+ylabel('Elapsed Time (seconds)');
+title('Number of UAVs vs Elapsed Time for Different Cluster Counts');
+legend;
+grid on;
+
+
+disp('elapsed_times:');
+disp(elapsed_times);
+

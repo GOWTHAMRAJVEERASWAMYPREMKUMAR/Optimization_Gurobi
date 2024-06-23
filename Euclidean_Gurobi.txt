@@ -1,0 +1,87 @@
+% Range of UAVs to test
+uav_range = 1:10;   % testing from 1 to 10 UAVs
+
+% Initializing arrays to store results
+optimal_values = zeros(length(uav_range), 1);
+elapsed_times = zeros(length(uav_range), 1);
+
+% Number of users
+m = 1000;
+
+% UAV Parameters
+UAV_HEIGHT = 350;
+THETA = 60 * pi / 180;
+Coverage_radius = UAV_HEIGHT * tan(THETA / 2);
+M = 2000;
+
+% Load user locations from the environment
+USER_LOC = load('UserLocation1.txt');
+
+% Looping over the number of UAVs
+for idx = 1:length(uav_range)
+    n = uav_range(idx);   % Set the current number of UAVs
+    
+    % Start timer for current iteration
+    start_time = tic;
+    
+    % Clear previous CVX runs
+    cvx_clear 
+    cvx_solver gurobi
+    
+    % Begin CVX problem
+    cvx_begin
+        variable x(n) % x-coordinate of the UAV 
+        variable y(n) % y-coordinate of the UAV
+        variable X(m, n) binary  % User association with UAV (mxn matrix) 
+
+        % Objective: Maximize the sum of connected users
+        maximize(sum(X(:))) % Maximize the user-UAV allocation
+
+        % Constraints
+        for i = 1:n
+            % Each UAV can serve at most 20 users
+            sum(X(:, i)) <= 20 
+
+            % Grid size constraints
+            0 <= x(i) <= 1000;
+            0 <= y(i) <= 1000;
+        end
+
+        % Distance constraints 
+        for j = 1:m
+            sum(X(j, :)) <= 1; % Each user is served by at most one UAV
+            for i = 1:n
+                % Euclidean distance calculation
+                dist = norm([x(i) - USER_LOC(j, 1); y(i) - USER_LOC(j, 2)], 2);
+                (dist - Coverage_radius) <= M * (1 - X(j, i));
+            end
+        end
+    cvx_end
+
+    % Record the elapsed time and optimal value for the current UAV count
+    elapsed_times(idx) = toc(start_time);
+    optimal_values(idx) = cvx_optval;
+    
+    % Display the final UAV positions for the current iteration
+    fprintf('Number of UAVs: %d\n', n);
+    fprintf('Final UAV positions:\n');
+    disp([x y]);
+end
+
+% Save results to a file in a specific directory
+save('C:\Users\gowth\OneDrive\Desktop\thesis defense results\LARGE_SCALE\uav_optimal_results.mat', 'uav_range', 'optimal_values');
+
+% Plot the results
+figure;
+plot(uav_range, elapsed_times, '-o', 'LineWidth', 2);
+xlabel('Number of UAVs');
+ylabel('Elapsed Time (seconds)');
+title('Elapsed Time vs. Number of UAVs');
+grid on;
+
+figure;
+plot(uav_range, optimal_values, '-o', 'LineWidth', 2);
+xlabel('Number of UAVs');
+ylabel('Optimal Value');
+title('Optimal Value vs. Number of UAVs');
+grid on;
